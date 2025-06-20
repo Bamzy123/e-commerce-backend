@@ -6,10 +6,10 @@ const {
     addToCart,
     removeFromCart
 } = require('../controllers/cartController');
+const { protect } = require('../middleware/authMiddleware');
 
-// All cart routes are private
-router.get('/', getUserCart);
-router.post('/', addToCart);
-router.delete('/:productId', removeFromCart);
+router.get('/', protect, getUserCart);
+router.post('/', protect, addToCart);
+router.delete('/:productId', protect, removeFromCart);
 
 module.exports = router;

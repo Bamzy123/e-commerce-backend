@@ -8,16 +8,14 @@ const {
     updateProduct,
     deleteProduct
 } = require('../controllers/productController');
+const { adminOnly } = require('../middleware/authMiddleware');
 
-// @route   GET /api/products
 router.get('/', getProducts);
-
-// @route   GET /api/products/:id
 router.get('/:id', getProductById);
 
-// Admin-only routes
-router.post('/', createProduct);
-router.put('/:id', updateProduct);
-router.delete('/:id', deleteProduct);
+// Only admins can perform these actions
+router.post('/', adminOnly, createProduct);
+router.put('/:id', adminOnly, updateProduct);
+router.delete('/:id', adminOnly, deleteProduct);
 
 module.exports = router;

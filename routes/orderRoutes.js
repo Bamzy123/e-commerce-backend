@@ -6,14 +6,10 @@ const {
     getUserOrders,
     getOrderById
 } = require('../controllers/orderController');
+const { protect } = require('../middleware/authMiddleware');
 
-// @route   POST /api/orders
-router.post('/', createOrder);
-
-// @route   GET /api/orders
-router.get('/', getUserOrders);
-
-// @route   GET /api/orders/:id
-router.get('/:id', getOrderById);
+router.post('/', protect, createOrder);
+router.get('/', protect, getUserOrders);
+router.get('/:id', protect, getOrderById);
 
 module.exports = router;
