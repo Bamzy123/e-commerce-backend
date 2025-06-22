@@ -1,4 +1,3 @@
-// app.js
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -28,5 +27,4 @@ app.use('/api/orders', orderRoutes);
 app.get('/', (req, res) => {
     res.json({ message: 'E-Commerce API is running' });
 });
-
 module.exports = app;
