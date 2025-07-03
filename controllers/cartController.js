@@ -16,7 +16,7 @@ const MESSAGES = {
 
 class CartService {
     static async findOrCreateCart(userId) {
-        let cart = await Cart.findOne(userId);
+        let cart = await Cart.findOne({userId});
         if (!cart) {
             cart = new Cart({
                 userId,
@@ -32,7 +32,7 @@ class CartService {
     }
 
     static async validateProduct(productId) {
-        const product = await Product.findById(productId);
+        const product = await Product.findById({productId});
         if (!product) {
             const error = new Error(MESSAGES.PRODUCT_NOT_FOUND);
             error.statusCode = HTTP_STATUS.NOT_FOUND;
@@ -65,7 +65,7 @@ exports.getUserCart = handleAsync(async (req, res) => {
 
 exports.addToCart = handleAsync(async (req, res) => {
     const {productId, quantity} = req.body;
-    const product = await CartService.validateProduct(productId);
+    const product = await CartService.validateProduct({productId});
     const cart = await CartService.findOrCreateCart(req.user.id);
 
     const itemIndex = cart.items.findIndex(

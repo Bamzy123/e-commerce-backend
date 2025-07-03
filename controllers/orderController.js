@@ -2,66 +2,121 @@ const Order = require('../models/order');
 const Cart = require('../models/cart');
 const {startSession} = require("mongoose");
 
-exports.createOrder = async (req, res) => {
-    const { shippingAddress, paymentMethod } = req.body;
+const HTTP_STATUS = {
+    OK: 200,
+    CREATED: 201,
+    BAD_REQUEST: 400,
+    NOT_FOUND: 404,
+    SERVER_ERROR: 500
+};
 
-    // Input validation
-    if (!shippingAddress || !paymentMethod) {
-        return res.status(400).json({
-            message: 'Shipping address and payment method are required'
-        });
-    }
+const ERROR_MESSAGES = {
+    INVALID_INPUT: 'Shipping address and payment method are required',
+    EMPTY_CART: 'Cart is empty',
+    PAYMENT_FAILED: 'Payment processing failed',
+    ORDER_NOT_FOUND: 'Order not found',
+    SERVER_ERROR: 'Server error',
+    ORDER_CREATION_FAILED: 'Failed to create order'
+};
+
+/**
+ * Handles database transactions with automatic rollback on error
+ * @param {Function} operation - Async function containing transaction operations
+ * @returns {Promise<*>} - Resolution of the operation
+ */
+async function executeTransaction(operation) {
     const session = await startSession();
     session.startTransaction();
 
     try {
-        const cart = await Cart.findOne({ userId: req.user.id });
-        if (!cart || cart.items.length === 0) {
-            return res.status(400).json({ message: 'Cart is empty' });
-        }
+        const result = await operation(session);
+        await session.commitTransaction();
+        return result;
+    } catch (error) {
+        await session.abortTransaction();
+        throw error;
+    } finally {
+        await session.endSession();
+    }
+}
 
-        const paymentResult = await processPayment(paymentMethod, cart.total);
-        if (!paymentResult.success) {
-            return res.status(400).json({ 
-                message: 'Payment processing failed' 
+/**
+ * Validates order creation input
+ * @param {Object} input - Order input data
+ * @returns {Boolean} - Validation result
+ */
+function validateOrderInput({shippingAddress, paymentMethod}) {
+    return Boolean(shippingAddress && paymentMethod);
+}
+
+/**
+ * Processes payment and handles payment-related errors
+ * @param {string} paymentMethod - Payment method
+ * @param {number} total - Order total
+ * @returns {Promise<Object>} - Payment result
+ */
+async function handlePaymentProcessing(paymentMethod, total) {
+    const paymentResult = await processPayment(paymentMethod, total);
+    if (!paymentResult.success) {
+        throw new Error(ERROR_MESSAGES.PAYMENT_FAILED);
+    }
+    return paymentResult;
+}
+
+exports.createOrder = async (req, res) => {
+    const {shippingAddress, paymentMethod} = req.body;
+
+    if (!validateOrderInput({shippingAddress, paymentMethod})) {
+        return res.status(HTTP_STATUS.BAD_REQUEST).json({
+            message: ERROR_MESSAGES.INVALID_INPUT
+        });
+    }
+
+    try {
+        const result = await executeTransaction(async (session) => {
+            const cart = await Cart.findOne({userId: req.user.id});
+            if (!cart?.items.length) {
+                throw new Error(ERROR_MESSAGES.EMPTY_CART);
+            }
+
+            await handlePaymentProcessing(paymentMethod, cart.total);
+
+            const order = new Order({
+                userId: req.user.id,
+                items: cart.items,
+                total: cart.total,
+                shippingAddress,
+                paymentMethod,
+                paymentStatus: 'completed'
             });
-        }
 
-        const order = new Order({
-            userId: req.user.id,
-            items: cart.items,
-            total: cart.total,
-            shippingAddress,
-            paymentMethod,
-            paymentStatus: 'completed'
+            const createdOrder = await order.save({session});
+            await Cart.findByIdAndDelete(cart._id, {session});
+
+            return createdOrder;
         });
 
-        const createdOrder = await order.save({ session });
-        await Cart.findByIdAndDelete(cart._id, { session });
-
-        // Commit transaction
-        await session.commitTransaction();
-        
-        res.status(201).json({
-            orderId: createdOrder._id,
+        res.status(HTTP_STATUS.CREATED).json({
+            orderId: result._id,
             message: 'Order created successfully'
         });
-    } catch (err) {
-        // Rollback transaction on error
-        await session.abortTransaction();
-        console.error('Order creation error:', err);
-        res.status(500).json({ message: 'Failed to create order' });
-    } finally {
-          await session.endSession();
+    } catch (error) {
+        console.error('Order creation error:', error);
+        const status = error.message === ERROR_MESSAGES.EMPTY_CART ?
+            HTTP_STATUS.BAD_REQUEST : HTTP_STATUS.SERVER_ERROR;
+        res.status(status).json({message: error.message || ERROR_MESSAGES.ORDER_CREATION_FAILED});
     }
 };
 
 exports.getUserOrders = async (req, res) => {
     try {
-        const orders = await Order.find({ userId: req.user.id }).sort({ createdAt: -1 });
-        res.json(orders);
-    } catch (err) {
-        res.status(500).json({ message: 'Server error', error: err.message });
+        const orders = await Order.find({userId: req.user.id}).sort({createdAt: -1});
+        res.status(HTTP_STATUS.OK).json(orders);
+    } catch (error) {
+        res.status(HTTP_STATUS.SERVER_ERROR).json({
+            message: ERROR_MESSAGES.SERVER_ERROR,
+            error: error.message
+        });
     }
 };
 
@@ -69,10 +124,15 @@ exports.getOrderById = async (req, res) => {
     try {
         const order = await Order.findById(req.params.id);
         if (!order || order.userId.toString() !== req.user.id) {
-            return res.status(404).json({ message: 'Order not found' });
+            return res.status(HTTP_STATUS.NOT_FOUND).json({
+                message: ERROR_MESSAGES.ORDER_NOT_FOUND
+            });
         }
-        res.json(order);
-    } catch (err) {
-        res.status(500).json({ message: 'Server error', error: err.message });
+        res.status(HTTP_STATUS.OK).json(order);
+    } catch (error) {
+        res.status(HTTP_STATUS.SERVER_ERROR).json({
+            message: ERROR_MESSAGES.SERVER_ERROR,
+            error: error.message
+        });
     }
 };

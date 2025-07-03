@@ -1,114 +1,115 @@
-// controllers/productController.js
 const Product = require('../models/product');
 
-// @desc    Get all products
-// @route   GET /api/products
-// @access  Public
-exports.getProducts = async (req, res) => {
-    try {
-        const products = await Product.find({});
-        res.json(products);
-    } catch (err) {
-        res.status(500).json({ message: 'Server error', error: err.message });
+class ProductNotFoundError extends Error {
+    constructor(message = ProductController.MESSAGES.PRODUCT_NOT_FOUND) {
+        super(message);
+        this.name = 'ProductNotFoundError';
+        this.statusCode = ProductController.HTTP_STATUS.NOT_FOUND;
     }
-};
+}
 
-// @desc    Get single product
-// @route   GET /api/products/:id
-// @access  Public
-exports.getProductById = async (req, res) => {
-    try {
-        const product = await Product.findById(req.params.id);
-        if (!product) {
-            return res.status(404).json({ message: 'Product not found' });
-        }
-        res.json(product);
-    } catch (err) {
-        res.status(500).json({ message: 'Server error', error: err.message });
+class ProductController {
+    static HTTP_STATUS = {
+        OK: 200,
+        CREATED: 201,
+        NOT_FOUND: 404,
+        SERVER_ERROR: 500
+    };
+
+    static MESSAGES = {
+        SERVER_ERROR: 'Server error',
+        PRODUCT_NOT_FOUND: 'Product not found',
+        PRODUCT_REMOVED: 'Product removed'
+    };
+
+    constructor() {
+        this.PRODUCT_FIELDS = ['name', 'description', 'price', 'category', 'image', 'stock', 'featured'];
     }
-};
 
-// @desc    Create a product (admin only)
-// @route   POST /api/products
-// @access  Private/Admin
-exports.createProduct = async (req, res) => {
-    const {
-        name,
-        description,
-        price,
-        category,
-        image,
-        stock,
-        featured
-    } = req.body;
+    handleError(res, err) {
+        const statusCode = err instanceof ProductNotFoundError
+            ? ProductController.HTTP_STATUS.NOT_FOUND
+            : ProductController.HTTP_STATUS.SERVER_ERROR;
 
-    try {
-        const product = new Product({
-            name,
-            description,
-            price,
-            category,
-            image,
-            stock,
-            featured
+        const message = err instanceof ProductNotFoundError
+            ? err.message
+            : ProductController.MESSAGES.SERVER_ERROR;
+
+        return res.status(statusCode).json({
+            message,
+            error: err.message
         });
-
-        const createdProduct = await product.save();
-        res.status(201).json(createdProduct);
-    } catch (err) {
-        res.status(500).json({ message: 'Server error', error: err.message });
     }
-};
 
-// @desc    Update a product (admin only)
-// @route   PUT /api/products/:id
-// @access  Private/Admin
-exports.updateProduct = async (req, res) => {
-    const {
-        name,
-        description,
-        price,
-        category,
-        image,
-        stock,
-        featured
-    } = req.body;
-
-    try {
-        const product = await Product.findById(req.params.id);
-
+    async findProductById(id) {
+        const product = await Product.findById(id);
         if (!product) {
-            return res.status(404).json({ message: 'Product not found' });
+            throw new ProductNotFoundError();
         }
-
-        product.name = name;
-        product.description = description;
-        product.price = price;
-        product.category = category;
-        product.image = image;
-        product.stock = stock;
-        product.featured = featured;
-
-        const updatedProduct = await product.save();
-        res.json(updatedProduct);
-    } catch (err) {
-        res.status(500).json({ message: 'Server error', error: err.message });
+        return product;
     }
-};
 
-// @desc    Delete a product (admin only)
-// @route   DELETE /api/products/:id
-// @access  Private/Admin
-exports.deleteProduct = async (req, res) => {
-    try {
-        const product = await Product.findById(req.params.id);
-        if (!product) {
-            return res.status(404).json({ message: 'Product not found' });
+    prepareProductData(data) {
+        return this.PRODUCT_FIELDS.reduce((acc, field) => {
+            if (data[field] !== undefined) {
+                acc[field] = data[field];
+            }
+            return acc;
+        }, {});
+    }
+
+    async getProducts(req, res) {
+        try {
+            const products = await Product.find({});
+            res.status(ProductController.HTTP_STATUS.OK).json(products);
+        } catch (err) {
+            this.handleError(res, err);
         }
-
-        await product.remove();
-        res.json({ message: 'Product removed' });
-    } catch (err) {
-        res.status(500).json({ message: 'Server error', error: err.message });
     }
-};
+
+    async getProductById(req, res) {
+        try {
+            const product = await this.findProductById(req.params.id);
+            res.status(ProductController.HTTP_STATUS.OK).json(product);
+        } catch (err) {
+            this.handleError(res, err);
+        }
+    }
+
+    async createProduct(req, res) {
+        try {
+            const productData = this.prepareProductData(req.body);
+            const product = new Product(productData);
+            const createdProduct = await product.save();
+            res.status(ProductController.HTTP_STATUS.CREATED).json(createdProduct);
+        } catch (err) {
+            this.handleError(res, err);
+        }
+    }
+
+    async updateProduct(req, res) {
+        try {
+            const product = await this.findProductById(req.params.id);
+            const updatedData = this.prepareProductData(req.body);
+            Object.assign(product, updatedData);
+            const updatedProduct = await product.save();
+            res.status(ProductController.HTTP_STATUS.OK).json(updatedProduct);
+        } catch (err) {
+            this.handleError(res, err);
+        }
+    }
+
+    async deleteProduct(req, res) {
+        try {
+            const product = await this.findProductById(req.params.id);
+            await product.deleteOne();
+            res.status(ProductController.HTTP_STATUS.OK).json({
+                message: ProductController.MESSAGES.PRODUCT_REMOVED
+            });
+        } catch (err) {
+            this.handleError(res, err);
+        }
+    }
+}
+
+module.exports = new ProductController();
