@@ -19,8 +19,8 @@ const userSchema = new mongoose.Schema({
     password: {
         type: String,
         required: [true, 'Password is required'],
-        minlength: [6, 'Password must be at least 6 characters'],
-        select: false // prevents this field from being returned in queries by default
+        minlength: [8, 'Password must be at least 6 characters'],
+        select: false
     },
     role: {
         type: String,
@@ -28,17 +28,14 @@ const userSchema = new mongoose.Schema({
         default: 'user'
     }
 }, {
-    timestamps: true // adds createdAt and updatedAt automatically
+    timestamps: true
 });
 
-// Hash password before saving
 userSchema.pre('save', async function(next) {
     // Only run if the password was modified
     if (!this.isModified('password')) return next();
-
-    // Hash the password with cost of 12
+    // Hash the password with a cost of 12
     this.password = await bcrypt.hash(this.password, 12);
-
     next();
 });
 

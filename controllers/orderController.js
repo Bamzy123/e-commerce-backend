@@ -1,12 +1,18 @@
-// controllers/orderController.js
 const Order = require('../models/order');
 const Cart = require('../models/cart');
+const {startSession} = require("mongoose");
 
-// @desc    Create new order from cart
-// @route   POST /api/orders
-// @access  Private
 exports.createOrder = async (req, res) => {
     const { shippingAddress, paymentMethod } = req.body;
+
+    // Input validation
+    if (!shippingAddress || !paymentMethod) {
+        return res.status(400).json({
+            message: 'Shipping address and payment method are required'
+        });
+    }
+    const session = await startSession();
+    session.startTransaction();
 
     try {
         const cart = await Cart.findOne({ userId: req.user.id });
@@ -14,28 +20,42 @@ exports.createOrder = async (req, res) => {
             return res.status(400).json({ message: 'Cart is empty' });
         }
 
+        const paymentResult = await processPayment(paymentMethod, cart.total);
+        if (!paymentResult.success) {
+            return res.status(400).json({ 
+                message: 'Payment processing failed' 
+            });
+        }
+
         const order = new Order({
             userId: req.user.id,
             items: cart.items,
             total: cart.total,
             shippingAddress,
-            paymentMethod
+            paymentMethod,
+            paymentStatus: 'completed'
         });
 
-        const createdOrder = await order.save();
+        const createdOrder = await order.save({ session });
+        await Cart.findByIdAndDelete(cart._id, { session });
 
-        // Clear cart after order is placed
-        await Cart.findByIdAndDelete(cart._id);
-
-        res.status(201).json(createdOrder);
+        // Commit transaction
+        await session.commitTransaction();
+        
+        res.status(201).json({
+            orderId: createdOrder._id,
+            message: 'Order created successfully'
+        });
     } catch (err) {
-        res.status(500).json({ message: 'Server error', error: err.message });
+        // Rollback transaction on error
+        await session.abortTransaction();
+        console.error('Order creation error:', err);
+        res.status(500).json({ message: 'Failed to create order' });
+    } finally {
+          await session.endSession();
     }
 };
 
-// @desc    Get user orders
-// @route   GET /api/orders
-// @access  Private
 exports.getUserOrders = async (req, res) => {
     try {
         const orders = await Order.find({ userId: req.user.id }).sort({ createdAt: -1 });
@@ -45,9 +65,6 @@ exports.getUserOrders = async (req, res) => {
     }
 };
 
-// @desc    Get order by ID
-// @route   GET /api/orders/:id
-// @access  Private
 exports.getOrderById = async (req, res) => {
     try {
         const order = await Order.findById(req.params.id);

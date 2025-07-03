@@ -2,68 +2,98 @@ const User = require('../models/user');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
-// Generate JWT Token
+const HTTP_STATUS = {
+    OK: 200,
+    CREATED: 201,
+    BAD_REQUEST: 400,
+    UNAUTHORIZED: 401,
+    SERVER_ERROR: 500
+};
+
+const MESSAGES = {
+    USER_EXISTS: 'User already exists',
+    INVALID_CREDENTIALS: 'Invalid email or password',
+    SERVER_ERROR: 'Server error',
+    INVALID_REQUEST: 'Invalid request data'
+};
+
+const handleError = (res, statusCode, message, error = null) => {
+    const response = {message};
+    if (error && process.env.NODE_ENV === 'development') {
+        response.error = error.message;
+    }
+    return res.status(statusCode).json(response);
+};
+
+const checkUserExists = async (email) => {
+    return User.findOne({email});
+};
+
+const mapUserResponse = (user, token) => ({
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    token
+});
+
 const generateToken = (id) => {
-    return jwt.sign({ id }, process.env.JWT_SECRET, {
+    return jwt.sign({id}, process.env.JWT_SECRET, {
         expiresIn: '30d',
     });
 };
 
-// @desc    Register a new user
-// @route   POST /api/auth/register
-// @access  Public
+const hashPassword = async (password) => {
+    const salt = await bcrypt.genSalt(10);
+    return await bcrypt.hash(password, salt);
+};
+
+const createUser = async (userData) => {
+    const hashedPassword = await hashPassword(userData.password);
+    const user = await User.create({
+        ...userData,
+        password: hashedPassword
+    });
+    const token = generateToken(user._id);
+    return mapUserResponse(user, token);
+};
+
 exports.registerUser = async (req, res) => {
-    const { name, email, password } = req.body;
+    const {name, email, password} = req.body;
+
+    if (!name || !email || !password) {
+        return handleError(res, HTTP_STATUS.BAD_REQUEST, MESSAGES.INVALID_REQUEST);
+    }
 
     try {
-        // Check if user exists
-        const userExists = await User.findOne({ email });
-        if (userExists) {
-            return res.status(400).json({ message: 'User already exists' });
+        const existingUser = await checkUserExists(email);
+        if (existingUser) {
+            return handleError(res, HTTP_STATUS.BAD_REQUEST, MESSAGES.USER_EXISTS);
         }
 
-        // Create user
-        const user = await User.create({
-            name,
-            email,
-            password
-        });
-
-        // Send response with token
-        res.status(201).json({
-            _id: user._id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-            token: generateToken(user._id)
-        });
+        const userData = await createUser({name, email, password});
+        res.status(HTTP_STATUS.CREATED).json(userData);
     } catch (err) {
-        res.status(500).json({ message: 'Server error', error: err.message });
+        handleError(res, HTTP_STATUS.SERVER_ERROR, MESSAGES.SERVER_ERROR, err);
     }
 };
 
-// @desc    Authenticate user & get token
-// @route   POST /api/auth/login
-// @access  Public
 exports.loginUser = async (req, res) => {
-    const { email, password } = req.body;
+    const {email, password} = req.body;
+
+    if (!email || !password) {
+        return handleError(res, HTTP_STATUS.BAD_REQUEST, MESSAGES.INVALID_REQUEST);
+    }
 
     try {
-        // Check for user email
-        const user = await User.findOne({ email }).select('+password');
+        const user = await User.findOne({email}).select('+password');
         if (!user || !(await user.comparePassword(password))) {
-            return res.status(401).json({ message: 'Invalid email or password' });
+            return handleError(res, HTTP_STATUS.UNAUTHORIZED, MESSAGES.INVALID_CREDENTIALS);
         }
 
-        // Send response with token
-        res.json({
-            _id: user._id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-            token: generateToken(user._id)
-        });
+        const token = generateToken(user._id);
+        res.status(HTTP_STATUS.OK).json(mapUserResponse(user, token));
     } catch (err) {
-        res.status(500).json({ message: 'Server error', error: err.message });
+        handleError(res, HTTP_STATUS.SERVER_ERROR, MESSAGES.SERVER_ERROR, err);
     }
 };

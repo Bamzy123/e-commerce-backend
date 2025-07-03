@@ -1,4 +1,3 @@
-// models/Product.js
 const mongoose = require('mongoose');
 
 const productSchema = new mongoose.Schema({
@@ -25,7 +24,7 @@ const productSchema = new mongoose.Schema({
     },
     image: {
         type: String,
-        default: 'https://via.placeholder.com/400x400'  // fallback image URL
+        default: 'https://www.caranddriver.com/features/g28985154/future-cars/'
     },
     stock: {
         type: Number,
